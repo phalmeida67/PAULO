@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle de Tarefas</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f0f2f5; margin:0; padding:20px; }
+  h1 { text-align:center; color:#333; }
+
+  .task-form, .filters, .bulk-actions {
+    max-width: 700px; margin:0 auto 20px; display:flex; gap:10px; flex-wrap:wrap; justify-content:center;
+  }
+  .task-form input, .task-form select, .filters select, .bulk-actions button {
+    padding:10px; border-radius:8px; border:1px solid #ccc; font-size:14px;
+  }
+  .task-form button, .bulk-actions button { cursor:pointer; background:#4caf50; color:#fff; border:none; }
+  .task-form button:hover, .bulk-actions button:hover { opacity:0.8; }
+  .bulk-actions button#deleteSelected { background:#e74c3c; }
+
+  .tasks-container { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:20px; }
+  .task-card { padding:20px; border-radius:12px; box-shadow:0 5px 15px rgba(0,0,0,0.1); position:relative; cursor:grab; color:#fff; display:flex; flex-direction:column; }
+  .task-card.dragging { opacity:0.5; }
+  .task-title { font-size:18px; margin-bottom:8px; font-weight:bold; }
+  .task-category, .task-priority, .task-date { font-size:14px; margin-bottom:6px; }
+  .task-status { padding:5px 10px; border-radius:20px; font-size:12px; font-weight:bold; display:inline-block; margin-bottom:10px; }
+
+  .status-pendente { background: rgba(255,255,255,0.8); color:#333; }
+  .status-concluido { background: rgba(0,0,0,0.6); color:#fff; }
+
+  .btn-toggle { position:absolute; top:15px; right:15px; padding:5px 10px; border:none; border-radius:8px; cursor:pointer; font-size:12px; transition:background 0.2s; }
+  .btn-toggle:hover { opacity:0.8; }
+  .btn-toggle-pendente { background: rgba(0,0,0,0.6); color:#fff; }
+  .btn-toggle-concluido { background: rgba(255,255,255,0.8); color:#333; }
+
+  .task-select { position:absolute; top:15px; left:15px; transform:scale(1.2); }
+</style>
+</head>
+<body>
+
+<h1>Controle de Tarefas</h1>
+
+<form class="task-form" id="taskForm">
+  <input type="text" id="taskTitle" placeholder="Título da tarefa" required>
+  <input type="text" id="taskCategory" placeholder="Categoria" required>
+  <select id="taskPriority" required>
+    <option value="" disabled selected>Prioridade</option>
+    <option value="Alta">Alta</option>
+    <option value="Média">Média</option>
+    <option value="Baixa">Baixa</option>
+  </select>
+  <button type="submit">Adicionar</button>
+</form>
+
+<div class="filters">
+  <select id="statusFilter">
+    <option value="Todas">Todas</option>
+    <option value="Pendente">Pendentes</option>
+    <option value="Concluído">Concluídas</option>
+  </select>
+  <select id="categoryFilter">
+    <option value="Todas">Todas as categorias</option>
+  </select>
+</div>
+
+<div class="bulk-actions">
+  <button id="markSelectedCompleted">Marcar Selecionadas Concluído</button>
+  <button id="markSelectedPending">Marcar Selecionadas Pendente</button>
+  <button id="deleteSelected">Deletar Selecionadas</button>
+</div>
+
+<div class="tasks-container" id="tasksContainer"></div>
+
+<script>
+const defaultTasks = [
+  { titulo:"Pagar conta de luz", categoria:"Financeiro", status:"Pendente", prioridade:"Alta", data:new Date().toISOString() },
+  { titulo:"Enviar relatório", categoria:"Trabalho", status:"Concluído", prioridade:"Média", data:new Date().toISOString() },
+  { titulo:"Comprar supermercado", categoria:"Pessoal", status:"Pendente", prioridade:"Baixa", data:new Date().toISOString() },
+  { titulo:"Agendar reunião", categoria:"Trabalho", status:"Pendente", prioridade:"Alta", data:new Date().toISOString() }
+];
+let tasks = JSON.parse(localStorage.getItem("tasks")) || defaultTasks;
+
+const container = document.getElementById("tasksContainer");
+const form = document.getElementById("taskForm");
+const titleInput = document.getElementById("taskTitle");
+const categoryInput = document.getElementById("taskCategory");
+const priorityInput = document.getElementById("taskPriority");
+const statusFilter = document.getElementById("statusFilter");
+const categoryFilter = document.getElementById("categoryFilter");
+
+const markCompletedBtn = document.getElementById("markSelectedCompleted");
+const markPendingBtn = document.getElementById("markSelectedPending");
+const deleteSelectedBtn = document.getElementById("deleteSelected");
+
+const priorityColors = { "Alta":"#e74c3c", "Média":"#f1c40f", "Baixa":"#2ecc71" };
+
+function renderTasks() {
+  container.innerHTML = "";
+  updateCategoryOptions();
+  let filteredTasks = tasks.filter(task => (statusFilter.value==="Todas"||task.status===statusFilter.value)&&(categoryFilter.value==="Todas"||task.categoria===categoryFilter.value));
+
+  filteredTasks.forEach((task,index)=>{
+    const card=document.createElement("div");
+    card.className="task-card";
+    card.style.backgroundColor=priorityColors[task.prioridade];
+    card.setAttribute("draggable","true");
+    card.dataset.index=index;
+
+    const statusClass=task.status==="Concluído"?"status-concluido":"status-pendente";
+    const btnClass=task.status==="Concluído"?"btn-toggle-concluido":"btn-toggle-pendente";
+    const btnText=task.status==="Concluído"?"Marcar Pendente":"Marcar Concluído";
+
+    card.innerHTML=`
+      <input type="checkbox" class="task-select" data-index="${index}">
+      <div class="task-title">${task.titulo}</div>
+      <div class="task-category">Categoria: ${task.categoria}</div>
+      <div class="task-priority">Prioridade: ${task.prioridade}</div>
+      <div class="task-date">Criado: ${new Date(task.data).toLocaleDateString('pt-BR')}</div>
+      <div class="task-status ${statusClass}">${task.status}</div>
+      <button class="btn-toggle ${btnClass}" onclick="toggleStatus(${index})">${btnText}</button>
+    `;
+    container.appendChild(card);
+  });
+
+  enableDragAndDrop();
+}
+
+function toggleStatus(index){
+  tasks[index].status=tasks[index].status==="Concluído"?"Pendente":"Concluído";
+  saveAndRender();
+}
+
+function saveAndRender(){ localStorage.setItem("tasks",JSON.stringify(tasks)); renderTasks(); }
+function updateCategoryOptions(){
+  const categories=["Todas",...new Set(tasks.map(t=>t.categoria))];
+  categoryFilter.innerHTML="";
+  categories.forEach(cat=>{const o=document.createElement("option");o.value=cat;o.textContent=cat;categoryFilter.appendChild(o);});
+  if(!categories.includes(categoryFilter.value)) categoryFilter.value="Todas";
+}
+
+form.addEventListener("submit",e=>{
+  e.preventDefault();
+  tasks.push({ titulo:titleInput.value.trim(), categoria:categoryInput.value.trim(), prioridade:priorityInput.value, status:"Pendente", data:new Date().toISOString() });
+  saveAndRender(); form.reset();
+});
+
+statusFilter.addEventListener("change",renderTasks);
+categoryFilter.addEventListener("change",renderTasks);
+
+// Bulk actions
+function getSelectedIndexes(){
+  return Array.from(document.querySelectorAll(".task-select:checked")).map(c=>parseInt(c.dataset.index));
+}
+
+markCompletedBtn.addEventListener("click",()=>{
+  getSelectedIndexes().forEach(i=>tasks[i].status="Concluído");
+  saveAndRender();
+});
+markPendingBtn.addEventListener("click",()=>{
+  getSelectedIndexes().forEach(i=>tasks[i].status="Pendente");
+  saveAndRender();
+});
+deleteSelectedBtn.addEventListener("click",()=>{
+  const selected=getSelectedIndexes().sort((a,b)=>b-a);
+  selected.forEach(i=>tasks.splice(i,1));
+  saveAndRender();
+});
+
+// Drag & Drop
+function enableDragAndDrop(){
+  let draggedIndex=null;
+  const cards=document.querySelectorAll(".task-card");
+  cards.forEach(card=>{
+    card.addEventListener("dragstart",()=>{draggedIndex=parseInt(card.dataset.index); card.classList.add("dragging");});
+    card.addEventListener("dragend",()=>{card.classList.remove("dragging"); draggedIndex=null;});
+    card.addEventListener("dragover",e=>{e.preventDefault();});
+    card.addEventListener("drop",()=>{const targetIndex=parseInt(card.dataset.index);
+      if(draggedIndex===null||draggedIndex===targetIndex) return;
+      const moved=tasks.splice(draggedIndex,1)[0];
+      tasks.splice(targetIndex,0,moved);
+      saveAndRender();
+    });
+  });
+}
+
+renderTasks();
+</script>
+
+</body>
+</html>
